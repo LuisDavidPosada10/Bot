@@ -53,7 +53,7 @@ export async function saveSessionToMongo(
         updatedAt: now,
         expiresAt: sessionExpiresAt(),
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     await UserModel.findOneAndUpdate(
@@ -63,7 +63,7 @@ export async function saveSessionToMongo(
         $set: { lastSeen: now, updatedAt: now },
         $max: { messageCount },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     logger.debug({ sessionId, messageCount: serialized.length }, 'Sesión sincronizada a MongoDB');
