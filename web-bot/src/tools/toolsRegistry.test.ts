@@ -8,12 +8,15 @@ describe('defaultTools registry', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('includes contactar_whatsapp only in portfolio mode', () => {
-    const standalone = getToolsForMode('standalone').map((t) => t.name);
+  it('portfolio mode usa menos tools que standalone (ahorro de tokens)', () => {
+    const standalone = getToolsForMode('standalone');
     const portfolio = getToolsForMode('portfolio').map((t) => t.name);
-    expect(standalone).not.toContain('contactar_whatsapp');
+    expect(standalone.length).toBeGreaterThan(portfolio.length);
     expect(portfolio).toContain('contactar_whatsapp');
-    expect(portfolio).toHaveLength(23);
+    expect(portfolio).toContain('perfil_luis');
+    expect(portfolio).toContain('analizar_oferta');
+    expect(portfolio).not.toContain('trivia_pregunta');
+    expect(portfolio).toHaveLength(8);
   });
 
   it('includes core utility and career tools', () => {

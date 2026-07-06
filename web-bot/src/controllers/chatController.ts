@@ -34,8 +34,8 @@ export async function handleChat(req: Request, res: Response) {
       answer: result.answer,
       sessionId,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     logger.error({ err }, 'Error en /chat');
-    return res.status(500).json({ error: 'Error interno', details: err?.message });
+    return res.status(500).json({ error: 'Error interno' });
   }
 }

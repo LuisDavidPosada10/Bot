@@ -44,11 +44,14 @@ export const SYNC_DEBOUNCE_MS = Number(process.env.SYNC_DEBOUNCE_MS ?? 30_000);
 export const MONGO_SESSION_TTL_DAYS = Number(process.env.MONGO_SESSION_TTL_DAYS ?? 30);
 
 /** Ventana de historial enviada al LLM (modo standalone) */
-export const HISTORY_MAX_TURNS = Number(process.env.HISTORY_MAX_TURNS ?? 10);
-export const HISTORY_MAX_TOKENS = Number(process.env.HISTORY_MAX_TOKENS ?? 7000);
+export const HISTORY_MAX_TURNS = Number(process.env.HISTORY_MAX_TURNS ?? 2);
+export const HISTORY_MAX_TOKENS = Number(process.env.HISTORY_MAX_TOKENS ?? 1200);
 /** Ventana más corta para asistente del portafolio */
-export const HISTORY_MAX_TURNS_PORTFOLIO = Number(process.env.HISTORY_MAX_TURNS_PORTFOLIO ?? 6);
-export const HISTORY_MAX_TOKENS_PORTFOLIO = Number(process.env.HISTORY_MAX_TOKENS_PORTFOLIO ?? 4000);
+export const HISTORY_MAX_TURNS_PORTFOLIO = Number(process.env.HISTORY_MAX_TURNS_PORTFOLIO ?? 2);
+export const HISTORY_MAX_TOKENS_PORTFOLIO = Number(process.env.HISTORY_MAX_TOKENS_PORTFOLIO ?? 900);
+
+/** Pasos máximos del agente (cada paso = otra llamada al LLM con más contexto) */
+export const AGENT_MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 3);
 
 export function ensureEnv(): string[] {
   const missing: string[] = [];

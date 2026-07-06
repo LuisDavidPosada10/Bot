@@ -1,4 +1,5 @@
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import { clipForModel, MODEL_LIMITS } from '../utils/clipForModel.js';
 
 export type HistoryWindowOptions = {
   maxTurns: number;
@@ -92,4 +93,29 @@ export function prepareHistoryForModel(
   }
 
   return windowed;
+}
+
+/** Acorta mensajes del historial antes de enviarlos al modelo. */
+export function truncateHistoryForModel(messages: BaseMessage[]): BaseMessage[] {
+  return messages.map((message) => {
+    if (message instanceof HumanMessage) {
+      const text = clipForModel(toText(message.content), MODEL_LIMITS.userHistoryChars);
+      return text === toText(message.content) ? message : new HumanMessage(text);
+    }
+    if (message instanceof AIMessage) {
+      const text = clipForModel(toText(message.content), MODEL_LIMITS.assistantHistoryChars);
+      if (text === toText(message.content) && !message.tool_calls?.length) return message;
+      return new AIMessage({
+        content: text,
+        tool_calls: message.tool_calls,
+      });
+    }
+    if (message instanceof ToolMessage) {
+      const text = clipForModel(toText(message.content), MODEL_LIMITS.toolMessageChars);
+      return text === toText(message.content)
+        ? message
+        : new ToolMessage({ content: text, tool_call_id: message.tool_call_id });
+    }
+    return message;
+  });
 }

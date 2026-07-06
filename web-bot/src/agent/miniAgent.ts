@@ -1,6 +1,8 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage } from '@langchain/core/messages';
-import { OPENAI_MODEL, OPENAI_API_KEY, OPENAI_BASE_URL, HISTORY_MAX_TURNS, HISTORY_MAX_TOKENS, HISTORY_MAX_TURNS_PORTFOLIO, HISTORY_MAX_TOKENS_PORTFOLIO } from '../config/env.js';
+import { OPENAI_MODEL, OPENAI_API_KEY, OPENAI_BASE_URL, HISTORY_MAX_TURNS, HISTORY_MAX_TOKENS, HISTORY_MAX_TURNS_PORTFOLIO, HISTORY_MAX_TOKENS_PORTFOLIO, AGENT_MAX_STEPS } from '../config/env.js';
+import { SYSTEM_PROMPT, PORTFOLIO_PROMPT } from './systemPrompt.js';
+import { clipForModel, MODEL_LIMITS } from '../utils/clipForModel.js';
 import { getMessages, setMessages } from '../store/sessionStore.js';
 import { getLogger } from '../utils/logger.js';
 import { sanitizeToolOutputForAgent } from '../utils/sanitizeToolOutput.js';
@@ -8,6 +10,8 @@ import { normalizeAiMessage, normalizeMessagesForModel } from '../store/messageC
 import {
   prepareHistoryForModel,
   slimMessagesForStorage,
+  truncateHistoryForModel,
+  estimateMessageTokens,
 } from '../store/historyWindow.js';
 
 const logger = getLogger('miniAgent');
@@ -198,39 +202,6 @@ function toText(content: AIMessage['content']): string {
   return '';
 }
 
-const SYSTEM_PROMPT =
-  'Eres el asistente de Luis David Posada, desarrollador Full Stack Junior Advanced con ~2 años de experiencia profesional. ' +
-  'NUNCA inventes años de experiencia (NO digas 5+ años ni senior si no está en los datos). ' +
-  'NUNCA menciones al usuario: nombres de herramientas, SMTP, Formspree, MongoDB, variables de entorno, errores técnicos ni configuración interna. ' +
-  'Si algo falla en el sistema, responde con amabilidad que hubo un inconveniente temporal y ofrece alternativa (reintentar o email posadaluis451@gmail.com). ' +
-  'Detecta si el usuario es reclutador, desarrollador curioso o estudiante y adapta la respuesta. ' +
-  'FLUJO RECLUTADOR (vacantes de desarrollador): ' +
-  '1) Vacante/JD → analizar_oferta. Resume coincidencias de forma positiva. ' +
-  '2) PROHIBIDO decir que Luis no cumple, no encaja, no tiene X stack, o que no deberían contactarlo. ' +
-  '3) Si la oferta menciona tecnologías que no aparecen en su CV, di que Luis puede comentar su experiencia relacionada en una conversación directa. ' +
-  '4) NO uses porcentajes ni match scores. ' +
-  '5) SIEMPRE cierra invitando a dejar contacto (nombre, email, empresa, rol) → enviar_contacto. Luis seguirá la conversación personalmente. ' +
-  'Para consultas de precios usa buscar_mejor_precio. Para info general usa buscar_web con moderación. ' +
-  'Para tiempo actual usa hora_actual y usa EXACTAMENTE fechaLegible/hora/anio del JSON devuelto; ' +
-  'NUNCA calcules ni corrijas la fecha/hora/año con tu propio conocimiento, aunque te parezca distinto. ' +
-  'Para matemáticas usa calculadora. ' +
-  'Para utilidades simples usa ejecutar_funcion. ' +
-  'Para clima usa clima_actual; si el JSON trae ciudad y temperatura, SIEMPRE muestra esos datos. ' +
-  'NUNCA digas que falló si la herramienta devolvió datos válidos. Usa fechas exactas (fecha, fechaLegible). ' +
-  'Para cripto usa cotizacion_cripto. Para divisas conversor_divisas. ' +
-  'Para contraseñas generar_contrasena. Para finanzas calculadora_financiera. ' +
-  'Para traducción traducir_texto; si hay traduccion en el JSON, muéstrala tal cual. Para recetas buscar_receta. ' +
-  'Para trivia trivia_pregunta con opciones A/B/C/D. Para QR generador_qr. ' +
-  'Para CV, curriculum, links o perfil profesional de Luis usa perfil_luis SIN argumentos; nunca inventes linkedin, github ni URLs. ' +
-  'Para roadmap/bullets crear_roadmap y generar_bullets_cv. ' +
-  'Para entrevista entrevista_tecnica mode=start/evaluate. ' +
-  'Evita búsquedas repetidas; responde en pocas iteraciones.';
-
-const PORTFOLIO_PROMPT =
-  ' MODO PORTAFOLIO: prioriza CV, vacantes y contacto. ' +
-  'Para WhatsApp usa contactar_whatsapp (enlace wa.me con mensaje prellenado). ' +
-  'Ofrécelo cuando pidan WhatsApp, chat directo o contacto rápido; también tras enviar_contacto como alternativa inmediata.';
-
 function systemPromptForMode(mode: 'portfolio' | 'standalone'): string {
   return mode === 'portfolio' ? SYSTEM_PROMPT + PORTFOLIO_PROMPT : SYSTEM_PROMPT;
 }
@@ -266,11 +237,20 @@ export async function runAgent(
   const toolMap = new Map<string, any>(tools.map((t) => [t.name, t]));
 
   const stored = slimMessagesForStorage(await getMessages(sessionId));
-  const history = normalizeMessagesForModel(
-    prepareHistoryForModel(stored, historyOptionsForMode(botMode))
+  const history = truncateHistoryForModel(
+    normalizeMessagesForModel(
+      prepareHistoryForModel(stored, historyOptionsForMode(botMode))
+    )
   );
   logger.debug(
-    { sessionId, storedLength: stored.length, historyLength: history.length, botMode },
+    {
+      sessionId,
+      storedLength: stored.length,
+      historyLength: history.length,
+      historyTokensEst: estimateMessageTokens(history),
+      botMode,
+      toolCount: tools.length,
+    },
     'Historia de sesión preparada'
   );
 
@@ -283,7 +263,7 @@ export async function runAgent(
   if (contextText && contextText.trim().length > 0) {
     messages.push(
       new HumanMessage(
-        `Contexto adicional del usuario (adjuntos/metadata):\n${contextText.slice(0, 20000)}`
+        `Contexto adicional del usuario (adjuntos/metadata):\n${contextText.slice(0, 6000)}`
       )
     );
     logger.debug({ contextLength: contextText.length }, 'Contexto agregado a mensajes');
@@ -291,7 +271,7 @@ export async function runAgent(
 
   const toolResults: ToolResult[] = [];
 
-  for (let step = 0; step < 5; step++) {
+  for (let step = 0; step < AGENT_MAX_STEPS; step++) {
     logger.debug({ step, sessionId }, 'Invocando modelo');
     let ai: AIMessage;
     try {
@@ -342,7 +322,10 @@ export async function runAgent(
       const outputRaw = await tool.invoke(args);
       const output =
         typeof outputRaw === 'string' ? outputRaw : JSON.stringify(outputRaw, null, 2);
-      const safeOutput = sanitizeToolOutputForAgent(call.name, output);
+      const safeOutput = clipForModel(
+        sanitizeToolOutputForAgent(call.name, output),
+        MODEL_LIMITS.toolMessageChars
+      );
       toolResults.push({ name: call.name, args: call.args, output });
       logger.debug({ step, sessionId, toolName: call.name, outputLength: output.length }, 'Herramienta completada');
       messages.push(new ToolMessage({ tool_call_id: call.id ?? '', content: safeOutput }));

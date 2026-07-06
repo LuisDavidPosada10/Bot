@@ -4,7 +4,7 @@ import { getLogger } from '../utils/logger.js';
 const logger = getLogger('l1SessionStore');
 
 export const TTL_MS = 60 * 60 * 1000;
-export const MAX_MSGS = 30;
+export const MAX_MSGS = 8;
 
 type SessionEntry = {
   messages: BaseMessage[];

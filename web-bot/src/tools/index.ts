@@ -53,10 +53,19 @@ export const defaultTools = [
   enviarContactoTool,
 ];
 
-/** Modo portafolio incluye WhatsApp; standalone no. */
+/** Modo portafolio: menos tools = menos tokens en cada request al LLM. */
 export function getToolsForMode(mode: BotMode = 'standalone') {
   if (mode === 'portfolio') {
-    return [...defaultTools, contactarWhatsappTool];
+    return [
+      horaActualTool,
+      perfilLuisTool,
+      analizarOfertaTool,
+      enviarContactoTool,
+      contactarWhatsappTool,
+      climaActualTool,
+      buscarWebTool,
+      traducirTextoTool,
+    ];
   }
   return defaultTools;
 }
