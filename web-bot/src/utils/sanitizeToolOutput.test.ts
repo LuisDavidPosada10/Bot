@@ -26,4 +26,15 @@ describe('sanitizeToolOutputForAgent', () => {
     expect(out.agentInstructions).toContain('enviar_contacto');
     expect(out.agentInstructions).not.toContain('matchScore');
   });
+
+  it('instruye mostrar clima cuando la herramienta tuvo éxito', () => {
+    const raw = JSON.stringify({
+      ciudad: 'Medellín',
+      temperatura: '23°C',
+      descripcion: 'Parcialmente nublado',
+    });
+    const out = JSON.parse(sanitizeToolOutputForAgent('clima_actual', raw));
+    expect(out.agentInstructions).toContain('NO digas que hubo error');
+    expect(out.ciudad).toBe('Medellín');
+  });
 });

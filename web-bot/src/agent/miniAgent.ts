@@ -19,6 +19,41 @@ export type AgentResult = {
   messages: BaseMessage[];
 };
 
+function looksLikeFalseFailure(answer: string): boolean {
+  return /inconveniente temporal|no pude obtener|intenta nuevamente|intenta de nuevo/i.test(answer);
+}
+
+function formatClimaFromToolOutput(output: string): string | null {
+  try {
+    const d = JSON.parse(output) as Record<string, unknown>;
+    if (d.error || typeof d.ciudad !== 'string') return null;
+    const lines = [
+      `**Clima en ${d.ciudad}${d.pais ? `, ${d.pais}` : ''}**`,
+      `- Temperatura: **${d.temperatura}** (sensación ${d.sensacionTermica})`,
+      `- Condición: ${d.descripcion}`,
+      `- Humedad: ${d.humedad} · Viento: ${d.viento}`,
+    ];
+    const forecast = d.pronostico3dias as Array<{
+      diaRelativo?: string;
+      fechaLegible?: string;
+      max?: string;
+      min?: string;
+      descripcion?: string;
+    }> | undefined;
+    if (forecast?.length) {
+      lines.push('', '**Próximos días:**');
+      for (const day of forecast) {
+        lines.push(
+          `- ${day.diaRelativo ?? day.fechaLegible}: ${day.max} / ${day.min}${day.descripcion ? ` — ${day.descripcion}` : ''}`
+        );
+      }
+    }
+    return lines.join('\n');
+  } catch {
+    return null;
+  }
+}
+
 function toText(content: AIMessage['content']): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -51,7 +86,8 @@ const SYSTEM_PROMPT =
   'NUNCA calcules ni corrijas la fecha/hora/año con tu propio conocimiento, aunque te parezca distinto. ' +
   'Para matemáticas usa calculadora. ' +
   'Para utilidades simples usa ejecutar_funcion. ' +
-  'Para clima usa clima_actual con fechas exactas del JSON (fecha, fechaLegible). Nunca inventes fechas. ' +
+  'Para clima usa clima_actual; si el JSON trae ciudad y temperatura, SIEMPRE muestra esos datos. ' +
+  'NUNCA digas que falló si la herramienta devolvió datos válidos. Usa fechas exactas (fecha, fechaLegible). ' +
   'Para cripto usa cotizacion_cripto. Para divisas conversor_divisas. ' +
   'Para contraseñas generar_contrasena. Para finanzas calculadora_financiera. ' +
   'Para traducción traducir_texto. Para recetas buscar_receta. ' +
@@ -133,7 +169,15 @@ export async function runAgent(
 
     const calls = ai.tool_calls ?? [];
     if (!calls.length) {
-      const answer = toText(ai.content);
+      let answer = toText(ai.content);
+      const climaResult = toolResults.find((t) => t.name === 'clima_actual');
+      if (climaResult && looksLikeFalseFailure(answer)) {
+        const fallback = formatClimaFromToolOutput(climaResult.output);
+        if (fallback) {
+          logger.warn({ sessionId }, 'Corrigiendo respuesta errónea del modelo tras clima_actual exitoso');
+          answer = fallback;
+        }
+      }
       logger.info({ sessionId, resultLength: answer.length, toolsUsed: toolResults.length }, 'Respuesta generada sin herramientas');
       if (sessionId) persistSession(sessionId, messages);
       return { answer, toolResults, messages };

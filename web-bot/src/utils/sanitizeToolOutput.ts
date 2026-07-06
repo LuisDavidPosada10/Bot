@@ -61,6 +61,15 @@ export function sanitizeToolOutputForAgent(toolName: string, raw: string): strin
       });
     }
 
+    if (toolName === 'clima_actual' && !parsed.error && parsed.ciudad) {
+      return JSON.stringify({
+        ...parsed,
+        agentInstructions:
+          'Los datos del clima se obtuvieron correctamente. Muestra temperatura, descripción, humedad, viento y pronóstico de pronostico3dias. ' +
+          'Usa las fechas exactas (fecha, fechaLegible). NO digas que hubo error ni inconveniente temporal.',
+      });
+    }
+
     if (toolName === 'enviar_contacto' && parsed.ok) {
       return JSON.stringify({
         status: parsed.partial ? 'registered' : 'sent',
