@@ -54,6 +54,135 @@ function formatClimaFromToolOutput(output: string): string | null {
   }
 }
 
+function formatRecetaFromToolOutput(output: string): string | null {
+  try {
+    const d = JSON.parse(output) as {
+      error?: string;
+      nombre?: string;
+      categoria?: string;
+      ingredientes?: Array<{ ingrediente: string; medida: string }>;
+      instrucciones?: string;
+    };
+    if (d.error || !d.nombre) return null;
+    const ings = (d.ingredientes ?? [])
+      .map((i) => `- ${i.ingrediente}${i.medida ? ` (${i.medida})` : ''}`)
+      .join('\n');
+    const steps = d.instrucciones?.slice(0, 900) ?? '';
+    return `**${d.nombre}**${d.categoria ? ` · ${d.categoria}` : ''}\n\n**Ingredientes:**\n${ings}\n\n**Preparación:**\n${steps}`;
+  } catch {
+    return null;
+  }
+}
+
+function formatTranslateFromToolOutput(output: string): string | null {
+  try {
+    const d = JSON.parse(output) as { traduccion?: string; error?: string };
+    if (d.error || typeof d.traduccion !== 'string') return null;
+    return d.traduccion;
+  } catch {
+    return null;
+  }
+}
+
+const TOOL_OUTPUT_FORMATTERS: Record<string, (output: string) => string | null> = {
+  clima_actual: formatClimaFromToolOutput,
+  perfil_luis: formatPerfilFromToolOutput,
+  traducir_texto: formatTranslateFromToolOutput,
+  buscar_receta: formatRecetaFromToolOutput,
+};
+
+function applyToolFallbacks(
+  answer: string,
+  toolResults: ToolResult[],
+  sessionId?: string
+): string {
+  if (!looksLikeFalseFailure(answer)) return answer;
+  for (let i = toolResults.length - 1; i >= 0; i--) {
+    const tr = toolResults[i];
+    const formatter = TOOL_OUTPUT_FORMATTERS[tr.name];
+    if (!formatter) continue;
+    const fixed = formatter(tr.output);
+    if (fixed) {
+      logger.warn({ sessionId, tool: tr.name }, 'Corrigiendo respuesta errónea del modelo tras herramienta exitosa');
+      return fixed;
+    }
+  }
+  return answer;
+}
+
+function isTranslateIntent(input: string): boolean {
+  return /\b(traduce|traducir|translate)\b/i.test(input);
+}
+
+async function directTranslateFallback(toolMap: Map<string, any>, input: string): Promise<string | null> {
+  const tool = toolMap.get('traducir_texto');
+  if (!tool) return null;
+  const match = input.match(/traduc(?:e|ir)(?:\s+al?\s+([\wáéíóúñ]+))?[:\s]+(.+)/i);
+  if (!match) return null;
+  const langWord = match[1]?.toLowerCase() ?? 'ingles';
+  const texto = match[2].trim();
+  const toLang: Record<string, string> = {
+    ingles: 'en',
+    inglés: 'en',
+    english: 'en',
+    frances: 'fr',
+    francés: 'fr',
+    aleman: 'de',
+    alemán: 'de',
+    portugues: 'pt',
+    portugués: 'pt',
+    italiano: 'it',
+    italiana: 'it',
+  };
+  const a = toLang[langWord] ?? 'en';
+  const raw = await tool.invoke({ texto, a, de: 'es' });
+  const output = typeof raw === 'string' ? raw : JSON.stringify(raw);
+  return formatTranslateFromToolOutput(output);
+}
+
+function formatPerfilFromToolOutput(output: string): string | null {
+  try {
+    const d = JSON.parse(output) as { mensajeSugerido?: string; error?: string };
+    if (d.error || typeof d.mensajeSugerido !== 'string') return null;
+    return d.mensajeSugerido;
+  } catch {
+    return null;
+  }
+}
+
+function isGroqToolValidationError(err: unknown): boolean {
+  const e = err as { status?: number; message?: string; error?: { code?: string; message?: string } };
+  const msg = String(e?.message ?? e?.error?.message ?? '');
+  return (
+    e?.status === 400 &&
+    (e?.error?.code === 'tool_use_failed' || msg.includes('Tool call validation failed'))
+  );
+}
+
+function isProfileIntent(input: string): boolean {
+  return /\b(perfil profesional|curriculum|curriculum vitae|\bcv\b|hoja de vida|linkedin|github|links de luis|datos de luis|contacto de luis|quien es luis)\b/i.test(
+    input
+  );
+}
+
+async function invokePerfilLuisFallback(
+  toolMap: Map<string, any>,
+  input: string,
+  sessionId: string | undefined,
+  messages: BaseMessage[]
+): Promise<AgentResult | null> {
+  if (!isProfileIntent(input) || !toolMap.has('perfil_luis')) return null;
+  const tool = toolMap.get('perfil_luis')!;
+  const outputRaw = await tool.invoke({});
+  const output = typeof outputRaw === 'string' ? outputRaw : JSON.stringify(outputRaw, null, 2);
+  const answer = formatPerfilFromToolOutput(output);
+  if (!answer) return null;
+  logger.warn({ sessionId }, 'Fallback directo a perfil_luis tras error de validación Groq');
+  const toolResults: ToolResult[] = [{ name: 'perfil_luis', args: {}, output }];
+  if (sessionId) persistSession(sessionId, messages);
+  return { answer, toolResults, messages };
+}
+
 function toText(content: AIMessage['content']): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -90,9 +219,9 @@ const SYSTEM_PROMPT =
   'NUNCA digas que falló si la herramienta devolvió datos válidos. Usa fechas exactas (fecha, fechaLegible). ' +
   'Para cripto usa cotizacion_cripto. Para divisas conversor_divisas. ' +
   'Para contraseñas generar_contrasena. Para finanzas calculadora_financiera. ' +
-  'Para traducción traducir_texto. Para recetas buscar_receta. ' +
+  'Para traducción traducir_texto; si hay traduccion en el JSON, muéstrala tal cual. Para recetas buscar_receta. ' +
   'Para trivia trivia_pregunta con opciones A/B/C/D. Para QR generador_qr. ' +
-  'Para CV, curriculum, links o perfil profesional de Luis usa perfil_luis y muestra los enlaces clicables. ' +
+  'Para CV, curriculum, links o perfil profesional de Luis usa perfil_luis SIN argumentos; nunca inventes linkedin, github ni URLs. ' +
   'Para roadmap/bullets crear_roadmap y generar_bullets_cv. ' +
   'Para entrevista entrevista_tecnica mode=start/evaluate. ' +
   'Evita búsquedas repetidas; responde en pocas iteraciones.';
@@ -164,18 +293,28 @@ export async function runAgent(
 
   for (let step = 0; step < 5; step++) {
     logger.debug({ step, sessionId }, 'Invocando modelo');
-    const ai = normalizeAiMessage(await toolCallingModel.invoke(messages));
+    let ai: AIMessage;
+    try {
+      ai = normalizeAiMessage(await toolCallingModel.invoke(messages));
+    } catch (err) {
+      const fallback = await invokePerfilLuisFallback(toolMap, input, sessionId, messages);
+      if (isGroqToolValidationError(err) && fallback) {
+        return fallback;
+      }
+      throw err;
+    }
     messages.push(ai);
 
     const calls = ai.tool_calls ?? [];
     if (!calls.length) {
       let answer = toText(ai.content);
-      const climaResult = toolResults.find((t) => t.name === 'clima_actual');
-      if (climaResult && looksLikeFalseFailure(answer)) {
-        const fallback = formatClimaFromToolOutput(climaResult.output);
-        if (fallback) {
-          logger.warn({ sessionId }, 'Corrigiendo respuesta errónea del modelo tras clima_actual exitoso');
-          answer = fallback;
+      answer = applyToolFallbacks(answer, toolResults, sessionId);
+      if (looksLikeFalseFailure(answer) && isTranslateIntent(input)) {
+        const translated = await directTranslateFallback(toolMap, input);
+        if (translated) {
+          logger.warn({ sessionId }, 'Fallback directo a traducir_texto tras respuesta errónea');
+          answer = translated;
+          toolResults.push({ name: 'traducir_texto', args: {}, output: JSON.stringify({ traduccion: translated }) });
         }
       }
       logger.info({ sessionId, resultLength: answer.length, toolsUsed: toolResults.length }, 'Respuesta generada sin herramientas');

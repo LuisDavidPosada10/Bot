@@ -70,6 +70,22 @@ export function sanitizeToolOutputForAgent(toolName: string, raw: string): strin
       });
     }
 
+    if (toolName === 'traducir_texto' && parsed.traduccion) {
+      return JSON.stringify({
+        ...parsed,
+        agentInstructions:
+          'La traducción está lista. Muestra el texto en el campo traduccion tal cual. NO digas que hubo error ni inconveniente temporal.',
+      });
+    }
+
+    if (toolName === 'buscar_receta' && parsed.nombre) {
+      return JSON.stringify({
+        ...parsed,
+        agentInstructions:
+          'La receta se encontró. Muestra nombre, ingredientes e instrucciones del JSON. NO digas que hubo error ni inconveniente temporal.',
+      });
+    }
+
     if (toolName === 'enviar_contacto' && parsed.ok) {
       return JSON.stringify({
         status: parsed.partial ? 'registered' : 'sent',

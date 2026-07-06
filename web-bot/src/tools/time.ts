@@ -1,6 +1,6 @@
 import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
 import { getLogger } from '../utils/logger.js';
+import { emptyToolSchema } from './schemas.js';
 
 const logger = getLogger('timeTool');
 
@@ -30,7 +30,8 @@ export const horaActualTool = tool(
     name: 'hora_actual',
     description:
       'Devuelve la fecha y hora actual real del servidor (ISO 8601, fecha legible, hora y año). ' +
-      'Usa siempre estos valores tal cual; no los reemplaces con una fecha estimada.',
-    schema: z.object({}),
+      'Usa siempre estos valores tal cual; no los reemplaces con una fecha estimada. ' +
+      'NO envíes parámetros.',
+    schema: emptyToolSchema,
   }
 );

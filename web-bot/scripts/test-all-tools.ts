@@ -3,7 +3,7 @@
  * Uso: npx tsx scripts/test-all-tools.ts
  */
 import 'dotenv/config';
-import { defaultTools } from '../src/tools/index.js';
+import { defaultTools, getToolsForMode } from '../src/tools/index.js';
 
 const API = process.env.API_URL ?? 'http://localhost:3000';
 
@@ -13,26 +13,37 @@ const toolArgs: Record<string, Record<string, unknown>> = {
   hora_actual: {},
   calculadora: { expresion: 'sqrt(144) + 2^3' },
   ejecutar_funcion: { nombre: 'saludar', argumentos: { nombre: 'Luis' } },
-  buscar_web: { consulta: 'capital de Colombia' },
-  buscar_mejor_precio: { producto: 'auriculares bluetooth', pais: 'co' },
+  buscar_web: { query: 'capital de Colombia' },
+  buscar_mejor_precio: { product: 'auriculares bluetooth', country: 'co' },
   clima_actual: { ciudad: 'Bogotá', unidad: 'c' },
-  cotizacion_cripto: { moneda: 'bitcoin' },
-  conversor_divisas: { cantidad: 100, de: 'USD', a: 'COP' },
-  calculadora_financiera: { tipo: 'interes_compuesto', capital: 1000, tasa: 5, periodos: 12 },
+  cotizacion_cripto: { monedas: ['bitcoin', 'ethereum'] },
+  conversor_divisas: { monto: 100, de: 'USD', a: 'COP' },
+  calculadora_financiera: {
+    tipo: 'interes_compuesto',
+    params: { capital: 1000, tasaAnual: 5, anos: 1 },
+  },
   generar_contrasena: { longitud: 16 },
   traducir_texto: { texto: 'Hello world', de: 'en', a: 'es' },
   generador_qr: { tipo: 'url', contenido: 'https://example.com' },
   buscar_receta: { nombre: 'pasta' },
   trivia_pregunta: { categoria: 'science', dificultad: 'easy' },
-  evaluar_cv: { texto_cv: 'Luis David Posada, desarrollador Full Stack con React y Node.js.' },
-  generar_carta: { puesto: 'Frontend Developer', empresa: 'Tech Corp', resumen_cv: '3 años React' },
-  analizar_oferta: {
-    oferta: 'Buscamos React, TypeScript, Node.js',
-    cv: 'Desarrollador con React, TypeScript, Express',
+  evaluar_cv: { cvText: 'Luis David Posada, desarrollador Full Stack con React y Node.js.' },
+  generar_carta: {
+    cvText: 'Desarrollador React con 2 años de experiencia',
+    jobDescription: 'Buscamos Frontend Developer con React',
   },
-  crear_roadmap: { rol: 'Frontend Developer', semanas: 4, nivel: 'junior' },
-  generar_bullets_cv: { experiencia: 'Desarrollé app React con 10k usuarios' },
-  entrevista_tecnica: { mode: 'start', rol: 'Frontend', nivel: 'junior' },
+  analizar_oferta: {
+    jobDescription: 'Buscamos React, TypeScript, Node.js',
+    cvText: 'Desarrollador con React, TypeScript, Express',
+  },
+  crear_roadmap: { gaps: ['TypeScript', 'testing'], weeks: 4, role: 'Frontend Developer' },
+  generar_bullets_cv: {
+    cvText: 'Desarrollé app React con 10k usuarios',
+    jobDescription: 'Frontend React TypeScript',
+  },
+  entrevista_tecnica: { mode: 'start', topic: 'frontend', level: 'junior' },
+  perfil_luis: {},
+  contactar_whatsapp: { mensaje: 'Hola Luis, vi tu portafolio' },
 };
 
 const chatPrompts: { label: string; message: string }[] = [
@@ -47,6 +58,7 @@ const chatPrompts: { label: string; message: string }[] = [
   { label: 'receta', message: 'Busca una receta de pasta carbonara' },
   { label: 'trivia', message: 'Dame una pregunta de trivia de ciencia' },
   { label: 'finanzas', message: 'Calcula el interés compuesto de 5000 USD al 8% anual por 3 años' },
+  { label: 'perfil', message: 'dime su perfil profesional' },
 ];
 
 function summarize(output: string, max = 200): string {
@@ -85,10 +97,11 @@ function checkOutput(tool: string, output: string): { ok: boolean; detail: strin
 
 async function testToolsDirect(): Promise<Result[]> {
   const results: Result[] = [];
-  const toolMap = new Map(defaultTools.map((t) => [t.name, t]));
 
   for (const [name, args] of Object.entries(toolArgs)) {
-    const tool = toolMap.get(name);
+    const tool =
+      defaultTools.find((t) => t.name === name) ??
+      getToolsForMode('portfolio').find((t) => t.name === name);
     if (!tool) {
       results.push({ tool: name, ok: false, detail: 'Tool no encontrada' });
       continue;
@@ -117,6 +130,7 @@ async function testToolsDirect(): Promise<Result[]> {
 
 async function testChat(): Promise<Result[]> {
   const results: Result[] = [];
+  const failurePhrases = /inconveniente temporal|error interno/i;
 
   for (const { label, message } of chatPrompts) {
     try {
@@ -138,8 +152,13 @@ async function testChat(): Promise<Result[]> {
 
       const answer = data.answer ?? '';
       const toolsUsed = (data.toolResults ?? []).map((t) => t.name).join(', ') || 'ninguna';
-      let ok = answer.length > 10;
+      let ok = answer.length > 10 && !failurePhrases.test(answer);
       let detail = `tools: ${toolsUsed}`;
+
+      if (label === 'perfil' && !/linkedin|github|CV|Luis/i.test(answer)) {
+        ok = false;
+        detail += ' | sin links de perfil';
+      }
 
       if (label === 'clima') {
         const year = new Date().getFullYear();

@@ -1,5 +1,4 @@
 import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
 import { PORTFOLIO_URL, WHATSAPP_NUMBER } from '../config/env.js';
 import {
   CANDIDATE_NAME,
@@ -10,6 +9,7 @@ import {
   CANDIDATE_EXPERIENCE_YEARS,
 } from '../data/candidateProfile.js';
 import { buildWhatsAppUrl, defaultPortfolioWhatsAppText } from '../utils/whatsappLink.js';
+import { emptyToolSchema } from './schemas.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('candidateLinksTool');
@@ -55,7 +55,8 @@ export const perfilLuisTool = tool(
     name: 'perfil_luis',
     description:
       'Devuelve el CV en PDF, LinkedIn, GitHub, email y portafolio oficial de Luis David Posada. ' +
-      'Usar cuando pidan CV, curriculum, hoja de vida, perfil profesional, links o como contactar a Luis.',
-    schema: z.object({}),
+      'Usar cuando pidan CV, curriculum, hoja de vida, perfil profesional, links o como contactar a Luis. ' +
+      'NO envíes parámetros ni inventes URLs; la herramienta devuelve todos los enlaces oficiales.',
+    schema: emptyToolSchema,
   }
 );

@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:tools": "tsx scripts/test-all-tools.ts",
+    "test:e2e": "tsx scripts/e2e-chat-battery.ts"
   },
   "dependencies": {
     "@langchain/community": "^1.0.4",
